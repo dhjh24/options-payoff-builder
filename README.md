@@ -28,8 +28,12 @@ pre-filled (decoded from the OptionStrat symbol `.NVDA260812C220`).
 
 ```
 options-visualizer/
-├── server.js              Express app + API routes
-├── lib/blackScholes.js    Pricing/greeks fallback engine
+├── server.js              Entry point — loads config, starts the listener
+├── app.js                 Express app + API routes
+├── lib/
+│   ├── blackScholes.js    Pricing/greeks fallback engine
+│   └── payoff.js          P&L-at-expiration engine + request validation
+├── test/                  node:test suites (see TESTING.md)
 ├── public/                Static frontend (HTML/CSS/vanilla JS + Chart.js via CDN)
 │   ├── index.html
 │   ├── style.css
@@ -48,6 +52,20 @@ npm start                 # http://localhost:3000
 
 `npm run dev` uses `node --watch` for auto-restart while editing.
 
+## Tests
+
+```bash
+npm test                # node --test
+npm run test:watch
+npm run test:coverage
+```
+
+Built on `node:test`/`node:assert` with `supertest` and `nock` as the only
+test-only dependencies. No test touches the network, so no API key is needed.
+Covers the Black–Scholes pricer, the payoff engine, and the HTTP contract
+including both the live-quote and theoretical pricing branches. The frontend is
+not covered — see [TESTING.md](TESTING.md).
+
 ## API
 
 | Route | Method | Body / Params | Purpose |
@@ -56,6 +74,10 @@ npm start                 # http://localhost:3000
 | `/api/price-leg` | POST | `{ symbol, strike, expiration, type, spot?, iv?, riskFreeRate? }` | Prices one leg (live if available, else theoretical) with greeks |
 | `/api/payoff` | POST | `{ spot, legs: [...], range? }` | Computes the P&L-at-expiration curve, breakevens, max profit/loss |
 | `/api/health` | GET | — | Health check |
+
+Every route validates its body and returns a `{ error }` JSON body on failure —
+`400` for a malformed request, `404` for an unknown symbol, `422` for a leg
+that is well-formed but unpriceable, `502` for an upstream failure.
 
 ## Notes
 

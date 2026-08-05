@@ -18,8 +18,11 @@ Node >= 18 (CI/dev currently on Node 22; Docker image is `node:20-alpine`),
 CommonJS (`"type": "commonjs"` — use `require`, not `import`).
 
 ```
-server.js              Express app: all routes, upstream fetch helpers, payoff math
+server.js              Entry point: loads dotenv, starts the listener
+app.js                 Express app: all routes, upstream fetch helpers (exported, not listening)
 lib/blackScholes.js    Black-Scholes-Merton pricer + first-order greeks (pure, no I/O)
+lib/payoff.js          P&L-at-expiration engine + request validation (pure, no I/O)
+test/                  node:test suites; see TESTING.md
 public/index.html      Single page; all element IDs the frontend binds to live here
 public/app.js          Vanilla DOM code, fetch calls, Chart.js config
 public/style.css       Dark theme; all colors are CSS custom properties in :root
@@ -28,7 +31,11 @@ docker-compose.yml     Publishes host 3100 -> container 3000
 .env.example           ALPHAVANTAGE_API_KEY, PORT
 ```
 
-Dependencies: `express`, `axios`, `cors`, `dotenv`. Chart.js is loaded from a
+`server.js` is deliberately thin: it exists so `app.js` can be required by the
+tests without binding a port. Add routes to `app.js`, not `server.js`.
+
+Dependencies: `express`, `axios`, `cors`, `dotenv`; `supertest` and `nock` are
+test-only. Chart.js is loaded from a
 CDN in `index.html` (v4.4.4), not from npm — the frontend is not self-hosted
 and needs network access to render the chart.
 
@@ -55,11 +62,20 @@ curl -s -X POST localhost:3000/api/payoff -H 'Content-Type: application/json' \
   -d '{"spot":180,"legs":[{"type":"call","side":"long","strike":220,"premium":12.5,"contracts":1}]}'
 ```
 
-**There is no test suite, no linter, and no formatter configured.** Do not
-claim tests pass. Verify changes by starting the server and exercising the
-endpoints with `curl`, and by loading the page in a browser for UI work. If you
-add tests, prefer starting with `lib/blackScholes.js` — it is pure and the
-easiest thing in the repo to assert on.
+## Tests
+
+```bash
+npm test                # node --test
+npm run test:watch
+npm run test:coverage
+```
+
+`node:test` + `node:assert` from the standard library, with `supertest` and
+`nock` as the only test-only dependencies. No test touches the network. Server
+and pure-math changes must keep `npm test` green — run it, and do not claim it
+passed without doing so. **There is still no linter or formatter configured**,
+and the frontend (`public/app.js`) has no coverage — verify UI work by loading
+the page in a browser. See `TESTING.md` for what is pinned and what is not.
 
 ## API surface
 
@@ -67,15 +83,26 @@ easiest thing in the repo to assert on.
 |---|---|---|---|
 | `/api/quote/:symbol` | GET | — | Alpha Vantage `GLOBAL_QUOTE`. 404 if no price, 502 on upstream error. |
 | `/api/price-leg` | POST | `{ symbol, strike, expiration, type, spot?, iv?, riskFreeRate? }` | Live quote if available, else theoretical. 422 if neither is possible. |
-| `/api/payoff` | POST | `{ spot, legs: [...], range? }` | Pure computation, no network. 400 on missing `legs`/`spot`. |
+| `/api/payoff` | POST | `{ spot, legs: [...], range? }` | Pure computation, no network. 400 on an invalid body. |
 | `/api/health` | GET | — | `{ ok: true }` |
+
+Every route validates its body up front and every failure — including a
+malformed JSON body, which Express would otherwise answer with HTML — comes
+back as `{ error }` JSON. `public/app.js` reads that shape on every non-OK
+response, so keep it.
+
+Request bodies are validated strictly but numeric fields are coerced, so
+`strike: "220"` is accepted while `strike: "abc"` is a 400. `type` and `side`
+are matched case-insensitively against a known set — an unrecognized value is
+a 400, never a silent fall-through to the other branch.
 
 ## Domain conventions that matter
 
-These are easy to get wrong and there are no tests to catch it:
+These are easy to get wrong. Each one now has a regression test in
+`test/payoff.test.js` — if you change the behavior, change the test knowingly.
 
 - **Premiums and strikes are per share; quantities are in contracts.**
-  `server.js` multiplies by 100 (`(contracts || 1) * (quantity || 1) * 100`).
+  `lib/payoff.js` multiplies by 100 (`(contracts || 1) * (quantity || 1) * 100`).
   Never pre-multiply a premium by 100 on the client.
 - **A `stock` leg reuses the `strike` field as its entry price**, and it is
   also scaled by the same `* 100` factor — so one "contract" of stock means
@@ -91,7 +118,10 @@ These are easy to get wrong and there are no tests to catch it:
   their precision is tied to that step count.
 - **`maxProfit`/`maxLoss` are bounds of the sampled window, not true limits.**
   An unbounded long call just reports the P&L at the top of the range; the UI
-  fakes "Unlimited" with a `> 1e6` threshold in `app.js`.
+  fakes "Unlimited" with a `> 1e6` threshold in `public/app.js`.
+- **Unknown leg types are rejected, not coerced.** `type` must be one of
+  `call`, `put`, `stock` — matching only `'call'` and letting everything else
+  fall through to the put branch was a real bug.
 
 ## Market data and the pricing fallback
 
@@ -106,16 +136,26 @@ returns `null` and `/api/price-leg` falls back to Black-Scholes with:
 The response carries `source: 'alphavantage'` or
 `source: 'theoretical-black-scholes'`; the UI surfaces this in the leg readout.
 **Keep that fallback path working** — it is what makes the app usable without a
-paid key. Any change to pricing should be exercised on both branches.
+paid key. `test/routes.test.js` exercises both branches with `nock`, including
+every way the upstream can fail; run it after any pricing change.
+
+`yearsToExpiration` in the response is the floored value actually used to
+price, so it is never negative even for an expired contract.
 
 `yearsUntil()` assumes expiration is `YYYY-MM-DD` and anchors to 21:00 UTC
-(approximate US market close). Greeks are scaled for display: theta is per day
-(`/365`), vega is per 1 vol point (`/100`).
+(approximate US market close); it returns `NaN` for anything else, so the route
+validates the format first. Greeks are scaled for display: theta is per day
+(`/365`), vega is per 1 vol point (`/100`). `priceAndGreeks` degenerates to
+discounted intrinsic with finite greeks when `sigma` or `T` is zero rather than
+returning `Infinity`/`NaN`.
 
 Failures in `fetchOptionQuote` are swallowed by design (`catch (_)`) so a bad
 upstream response degrades to theoretical pricing rather than erroring.
 
 ## Frontend conventions
+
+(`app.js` in this section means `public/app.js`, not the Express app at the
+repo root.)
 
 - `app.js` binds to element IDs from `index.html` via a `$(id)` helper. Adding
   a field means touching both files; there is no templating.
@@ -140,11 +180,15 @@ upstream response degrades to theoretical pricing rather than erroring.
   functions, `async/await` with `try/catch` per route.
 - Comments are sparse and explain *why* (e.g. why the fallback exists). Do not
   add narration comments over obvious code.
-- Keep `lib/` pure and I/O-free; network calls belong in `server.js`.
+- Keep `lib/` pure and I/O-free; network calls belong in `app.js`.
 - Validate request bodies at the top of each route and return a 4xx with a
   short `{ error }` message, as the existing routes do. Reserve 5xx for
   genuine failures, `502` for upstream problems, `422` for "well-formed but
-  unpriceable".
+  unpriceable". Prefer pushing validation into a pure `validate*` function in
+  `lib/` that returns a message or `null`, as `lib/payoff.js` does — it keeps
+  the route thin and the rules directly testable.
+- Add a test alongside a behavior change, and run `npm test` before claiming
+  anything passes.
 - Never commit `.env` or a real API key. `.env` is gitignored; document new
   variables in `.env.example` instead.
 - If you add a file the container needs, add it to the `COPY` lines in the
