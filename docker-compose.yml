@@ -1,0 +1,11 @@
+services:
+  options-payoff-builder:
+    build: .
+    image: options-payoff-builder:latest
+    container_name: options-payoff-builder
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    environment:
+      ALPHAVANTAGE_API_KEY: ${ALPHAVANTAGE_API_KEY:-demo}
+      PORT: "3000"
