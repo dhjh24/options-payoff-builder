@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Payoff — Options Strategy Builder</title>
+<link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">⌁</span>
+      <span class="brand-name">Payoff</span>
+      <span class="brand-sub">strategy builder</span>
+    </div>
+    <div class="ticker" id="ticker">
+      <span class="ticker-symbol" id="tickerSymbol">NVDA</span>
+      <span class="ticker-price" id="tickerPrice">—</span>
+      <span class="ticker-change" id="tickerChange">—</span>
+      <span class="ticker-status" id="tickerStatus">fetching…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT: strategy ticket -->
+    <section class="ticket" aria-label="Strategy configuration">
+      <h1 class="ticket-title">Long Call</h1>
+      <p class="ticket-sub">One leg. Right, no obligation, to buy 100 shares per contract at the strike.</p>
+
+      <form id="legForm" class="form-grid">
+        <label class="field">
+          <span>Underlying</span>
+          <input type="text" id="symbol" value="NVDA" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <label class="field">
+          <span>Side</span>
+          <select id="side">
+            <option value="long" selected>Long (buy)</option>
+            <option value="short">Short (sell)</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Type</span>
+          <select id="optType">
+            <option value="call" selected>Call</option>
+            <option value="put">Put</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Strike</span>
+          <input type="number" id="strike" value="220" step="0.5" />
+        </label>
+
+        <label class="field">
+          <span>Expiration</span>
+          <input type="date" id="expiration" value="2026-08-12" />
+        </label>
+
+        <label class="field">
+          <span>Contracts</span>
+          <input type="number" id="contracts" value="1" min="1" step="1" />
+        </label>
+
+        <label class="field field-wide">
+          <span>Premium override <em>(per share — leave blank to price it)</em></span>
+          <input type="number" id="premiumOverride" placeholder="auto" step="0.01" />
+        </label>
+
+        <button type="submit" class="btn-primary">Price &amp; plot</button>
+      </form>
+
+      <div class="leg-readout" id="legReadout" hidden>
+        <div class="readout-row"><span>Mark</span><b id="roMark">—</b></div>
+        <div class="readout-row"><span>Source</span><b id="roSource">—</b></div>
+        <div class="readout-row"><span>IV</span><b id="roIV">—</b></div>
+        <div class="readout-row"><span>Delta</span><b id="roDelta">—</b></div>
+        <div class="readout-row"><span>Gamma</span><b id="roGamma">—</b></div>
+        <div class="readout-row"><span>Theta / day</span><b id="roTheta">—</b></div>
+        <div class="readout-row"><span>Vega</span><b id="roVega">—</b></div>
+      </div>
+
+      <p class="hint">URL decode: <code>.NVDA260812C220</code> → NVDA, exp 2026‑08‑12, Call, strike 220.</p>
+    </section>
+
+    <!-- RIGHT: chart + stats -->
+    <section class="board" aria-label="Payoff diagram">
+      <div class="stat-strip" id="statStrip">
+        <div class="stat">
+          <span class="stat-label">Max profit</span>
+          <span class="stat-value profit" id="statMaxProfit">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Max loss</span>
+          <span class="stat-value loss" id="statMaxLoss">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Breakeven</span>
+          <span class="stat-value" id="statBreakeven">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Net premium</span>
+          <span class="stat-value" id="statPremium">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">P&amp;L at spot</span>
+          <span class="stat-value" id="statPlSpot">—</span>
+        </div>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="payoffChart" height="380"></canvas>
+      </div>
+      <p class="chart-caption">P&amp;L at expiration across underlying price · dashed amber = strike · dashed white = current spot</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Theoretical pricing via Black–Scholes when no live market quote is available. Not investment advice.</span>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
